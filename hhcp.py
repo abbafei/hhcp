@@ -120,7 +120,7 @@ app = application
 
 
 if __name__ == '__main__':
-    get_optval = lambda params, n, default_val=None: ((params[0][tuple(i[0] for i in params[0]).index(n)][1]) if (n in frozenset(i[0] for i in params[0])) else default_val)
+    get_optval = lambda params, n, default_val=None, to=(lambda val: val): (to(params[0][tuple(i[0] for i in params[0]).index(n)][1]) if (n in frozenset(i[0] for i in params[0])) else default_val)
     get_optflag = lambda params, n: (n in frozenset(i[0] for i in params[0]))
     get_optparam = lambda params, i, default_val=None: (params[1][i] if (len(params[1]) > i) else default_val)
 
