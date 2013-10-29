@@ -1,23 +1,43 @@
 #!/usr/bin/env python2
 import cgi
-import email
-import email.parser
 import wsgiref
 import wsgiref.simple_server
-import urlparse
 import urllib
 import sys
 import os
 import os.path
-import contextlib
 import getopt
+import email.header
+import email.message
+import StringIO
+import random
+import string
 
 
 
 
 
-def hcp_state():
+def stdin_filepath(in_path='/dev/stdin', in_f=sys.stdin):
+    try:
+        with open(in_path) as f:
+            is_stdin = os.path.sameopenfile(f.fileno(), in_f.fileno())
+        if is_stdin:
+            lp = os.path.realpath(in_path)
+            with open(lp) as f:
+                pass
+            return lp
+        else:
+            return None
+    except IOError as e:
+        if e.errno in (2, 6):
+            return False
+
+
+
+
+def hcp_state(di_file=None):
     state = {'done':  False, 'exit': 0}
+    field_name = 'zachinalach'
     def handle_http_request(environ, start_response):
         if state['done']:
             return
@@ -25,63 +45,37 @@ def hcp_state():
         if rm == 'GET':
             start_response('200 ok Boruch Hashem', [('Content-Type', 'text/html')])
             yield '''<html><head></head><body>
-            <form action="/" enctype="multipart/form-data" method="POST">
-                <input type="file" name="zachinalach" />
+            <form action="{html_app_uri}" enctype="multipart/form-data" method="POST">
+                <input type="file" name="{html_field_name}" />
                 <input type="submit" />
             </form>
-            </html>'''
+            </html>'''.format(**dict(('html_{0}'.format(k), cgi.escape(v, True)) for k, v in {'app_uri': "{0}/send".format(environ['SCRIPT_NAME']), 'field_name': field_name}.iteritems()))
         elif rm == 'POST':
-            start_response('302 Found', [('Location', 'data:text/plain,File received. Yasher Koach!')])
+            start_response('302 Found', [('Location', 'data:text/plain,File received.')])
             state['done'] = True
-            if 'multipart/form-data' in environ['CONTENT_TYPE']:
-                '''
-                def reader(f, length=None, chunk_size=512):
-                    if length is None:
-                        return iter(lambda: f.read(chunk_size), '')
+            m = email.message.Message()
+            m.add_header('Content-Type', environ['CONTENT_TYPE'])
+            content_type = m.get_content_type()
+            fz = (lambda fs: (fs[field_name].file if ((content_type == 'multipart/form-data') and fs[field_name].file) else (StringIO.StringIO(fs.getfirst(field_name)) if (content_type == 'application/x-www-form-urlencoded') else StringIO.StringIO(''))))(fs=cgi.FieldStorage(fp=environ['wsgi.input'], environ=environ))
+            with (os.fdopen(sys.stdout.fileno(), 'wb') if (di_file is None) else open(di_file, 'ab')) as f:
+                try:
+                    for c in wsgiref.util.FileWrapper(fz):
+                        f.write(c)
+                except IOError as e:
+                    if e.errno in (9, 32):
+                        sys.stderr.write('{0}\n'.format(str(e)))
+                        state['exit'] = 2
                     else:
-                        def wl():
-                            r = 0
-                            while r < length:
-                                rs = ((length % chunk_size) if (chunk_size > (length - r)) else chunk_size)
-                                yield f.read(rs)
-                                r += rs
-                        return wl()
-
-
-                fpsr = email.parser.FeedParser()
-                fpsr.feed('Content-Type: {ct}\r\n\r\n'.format(ct=environ['CONTENT_TYPE']))
-                for c in reader(environ['wsgi.input'], length=(int(environ['CONTENT_LENGTH']) if (('CONTENT_LENGTH' in environ) and (environ['CONTENT_LENGTH'] != "")) else None)):
-                    fpsr.feed(c)
-                m = fpsr.close()
-                if m.is_multipart:
-                    for p in m.walk():
-                        pname = p.get_param('name', failobj="", header='Content-Disposition')
-                        if (email.utils.collapse_rfc2231_value(pname) == 'zachinalach') and (not p.is_multipart()):
-                            with os.fdopen(sys.stdout.fileno(), 'wb') as f:
-                                for l in email.iterators.body_line_iterator(p, decode=True):
-                                    f.write(l)
-                '''
-                fs = cgi.FieldStorage(fp=environ['wsgi.input'], environ=environ)['zachinalach']
-                if fs.file:
-                    with os.fdopen(sys.stdout.fileno(), 'wb') as f:
-                        try:
-                            for c in wsgiref.util.FileWrapper(fs.file):
-                                f.write(c)
-                        except IOError as e:
-                            if e.errno in (9, 32):
-                                sys.stderr.write('{0}\n'.format(str(e)))
-                                state['exit'] = 2
-                            else:
-                                raise
+                        raise
     return (lambda k: state[k], handle_http_request)
 
 
-def cph_state(ifile=None):
+def cph_state(di_file=None):
     state = {'done':  False, 'exit': 0}
-    if ifile and ((not os.path.exists(ifile)) or os.path.isdir(ifile)):
-        raise IOError('{0} is not an acceptable file.'.format(ifile))
-    file_name_frag = urllib.quote_plus('file' if ifile is None else os.path.basename(ifile))
-    clen = (os.path.getsize(ifile) if ifile is not None and os.path.isfile(ifile) else None)
+    if di_file and ((not os.path.exists(di_file)) or os.path.isdir(di_file)):
+        raise IOError('{0} is not an acceptable file.'.format(di_file))
+    file_name_frag = urllib.quote_plus(os.path.basename((stdin_filepath() or 'file{0}'.format(''.join(random.choice(string.digits) for _ in range(7)))) if (di_file is None) else di_file))
+    clen = (os.path.getsize(di_file) if (di_file is not None) and os.path.isfile(di_file) else None)
 
     def handle_http_request(environ, start_response):
         if state['done']:
@@ -89,21 +83,19 @@ def cph_state(ifile=None):
         rm = environ['REQUEST_METHOD']
         if rm == 'GET':
             sn = environ['PATH_INFO']
-            if sn == '{0}{1}'.format('/', file_name_frag):
+            if sn == '/{0}'.format(file_name_frag):
                 start_response('200 ok Boruch Hashem', [('Content-Type', 'application/octet-stream')] + ([] if clen is None else [('Content-Length', str(clen))]))
                 state['done'] = True
                 try:
-#                    with contextlib.closing(wsgiref.util.FileWrapper(os.fdopen(sys.stdin.fileno(), 'rb') if ifile is None else open(ifile, 'rb'))) as wf:
-#                        for c in wf:
-#                            yield c
-                    #return (environ['wsgi.file_wrapper'] if 'wsgi.file_wrapper' in environ else wsgiref.util.FileWrapper)(os.fdopen(sys.stdin.fileno(), 'rb') if ifile is None else open(ifile, 'rb'))
-                    return wsgiref.util.FileWrapper(os.fdopen(sys.stdin.fileno(), 'rb') if ifile is None else open(ifile, 'rb'))
+                    return wsgiref.util.FileWrapper(os.fdopen(sys.stdin.fileno(), 'rb') if (di_file is None) else open(di_file, 'rb'))
                 finally:
                     pass
             else:
-                start_response('302 Found', [('Location', '{0}{1}'.format(wsgiref.util.application_uri(environ), file_name_frag))])
+                app_uri = wsgiref.util.application_uri(environ)
+                start_response('302 Found', [('Location', '{0}{1}{http_filename}'.format(app_uri, ('' if app_uri.endswith('/') else '/'), http_filename=str(email.header.Header(file_name_frag))))])
                 return ()
     return (lambda k: state[k], handle_http_request)
+
 
 
 hcp = hcp_state()[1]
@@ -124,50 +116,41 @@ if __name__ == '__main__':
     get_optflag = lambda params, n: (n in frozenset(i[0] for i in params[0]))
     get_optparam = lambda params, i, default_val=None: (params[1][i] if (len(params[1]) > i) else default_val)
 
+    prog_names = ('hcp', 'cph')
+    default_port = 8000
 
-    progname = os.path.basename(sys.argv[0])
-    if progname == 'hcp':
-        called_as = 'hcp'
-    elif progname == 'cph':
-        called_as = 'cph'
-    else:
-        called_as = None
-    if called_as is None:
-        if len(sys.argv) > 1:
-            if sys.argv[1] in ('hcp', 'cph'):
-                called_as = sys.argv[1]
-                params = sys.argv[1:]
-    else:
-        params = sys.argv
+    basename = os.path.basename(sys.argv[0])
+    is_called_as_subcommand = ((len(sys.argv) > 1) and (sys.argv[1] in prog_names) and (basename not in prog_names))
+    run_name = (sys.argv[1] if is_called_as_subcommand else basename)
+    params = ((' '.join(sys.argv[:1]) if is_called_as_subcommand else sys.argv[0]),) + tuple(sys.argv[(2 if is_called_as_subcommand else 1):])
 
-    if called_as is None:
-        sys.stdout.write('Usage: {0} <cmd>\n\tcmd: "hcp" or "cph"\nOr create a symlink to this file named as <cmd>.\n\n'.format(sys.argv[0]))
-    else:
-        if called_as == 'hcp':
-            default_port = 8000
-            if (len(params) > 1) and (params[1] in ('-h', '--help', '/?')):
-                sys.stdout.write('Usage: {0} [port [host]]\n\tDefault port: {default_port}\n\n'.format(params[0], default_port=str(default_port)))
+    if run_name in prog_names:
+        optparams = getopt.gnu_getopt(params[1:], 'p:n:f:ch')
+        di_file = get_optval(optparams, '-f', None)
+        host = get_optval(optparams, '-n', "")
+        portnum = get_optval(optparams, '-p', default_port, int)
+        do_help = get_optflag(optparams, '-h')
+        is_cgi = get_optflag(optparams, '-c')
+
+        if do_help:
+            if run_name == 'hcp':
+                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <output_file>]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<output_file>: path to output file (to be appended to)\n\n'
             else:
-                cp = hcp_state()
-                host = (params[2] if (len(params) > 2) else "")
-                portnum = (int(params[1]) if (len(params) > 1) else default_port)
+                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <input_file>]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<input_file>: path to input file\n\n'
+            sys.stdout.write(help_msg.format(params[0], default_port=str(default_port)))
+        else:
+            cp = (hcp_state if (run_name == 'hcp') else cph_state)(di_file=di_file)
+            if is_cgi:
+                if di_file is not None:
+                    wsgiref.handlers.CGIHandler().run(cp[1])
+                else:
+                    raise Exception('cannot run in cgi mode without a file')
+            else:
                 s = wsgiref.simple_server.make_server(host, portnum, cp[1])
-                sys.stderr.write('Listening on {host}:{port}...\n'.format(host=(host if bool(len(host)) else '<default_host>'), port=str(portnum)))
+                sys.stderr.write('Listening on {host}:{port}...\n'.format(host=host, port=str(portnum)))
                 while not cp[0]('done'):
                     s.handle_request()
-                exit(cp[0]('exit'))
-        elif called_as == 'cph':
-            default_port = 8000
-            if (len(params) > 1) and (params[1] in ('-h', '--help', '/?')):
-                sys.stdout.write('Usage: {0} [-p <port>] [-h <host>] [<input_file>]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<input_file>: path to input file\n\n'.format(params[0], default_port=str(default_port)))
-            else:
-                optparams = getopt.gnu_getopt(params[1:], 'p:h:')
-                ifile = get_optparam(optparams, 0, None)
-                host = get_optval(optparams, '-h', "")
-                portnum = int(get_optval(optparams, '-p', default_port))
-                cp = cph_state(ifile=ifile)
-                s = wsgiref.simple_server.make_server(host, portnum, cp[1])
-                sys.stderr.write('Listening on {host}:{port}...\n'.format(host=(host or '<default_host>'), port=str(portnum)))
-                while not cp[0]('done'):
-                    s.handle_request()
-                exit(cp[0]('exit'))
+            exit(cp[0]('exit'))
+    else:
+        sys.stderr.write('Usage: {0} <cmd>\n\tcmd: {prog_names}\nOr create a symlink to this file named as <cmd>.\n\n'.format(sys.argv[0], prog_names=' or '.join('"{0}"'.format(i) for i in prog_names)))
+        exit(2)
