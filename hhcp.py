@@ -94,7 +94,7 @@ def cph_state(di_file=None):
         rm = environ['REQUEST_METHOD']
         if rm == 'GET':
             sn = (environ['PATH_INFO'] if ('PATH_INFO' in environ) else '')
-            if (sn[0] == '/') and (urllib.quote_plus(sn[1:]) == '{0}'.format(di_file_url)):
+            if (len(sn) > 0) and (sn[0] == '/') and (urllib.quote_plus(sn[1:]) == '{0}'.format(di_file_url)):
                 start_response('200 ok Boruch Hashem', [('Content-Type', 'application/octet-stream'), ('Content-Disposition', 'attachment; filename="{http_f}"; filename*={http_fs}'.format(**dict(('http_{0}'.format(k), verify_http_header_component(v)) for k, v in dict(f=file_name_frag.decode('ascii', errors='ignore').replace('"', ''), fs=email.utils.encode_rfc2231(file_name_frag, 'UTF-8')).iteritems())))] + ([] if (clen is None) else [('Content-Length', str(clen))]))
                 state['done'] = True
                 try:
