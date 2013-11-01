@@ -8,13 +8,24 @@ import os
 import os.path
 import getopt
 import email.header
-import email.message
+import email.utils
+import email.errors
 import StringIO
 import random
 import string
+import re
 
 
 
+
+
+def verify_http_header_component(v):
+    ec = email.header.Header(v).encode()
+
+    if re.search(r'(\r?\n[\S\n\r]|\r[\S\r])', ec):
+        raise Exception('http header input error in "{h}"'.format(h=v))
+    else:
+        return ec
 
 
 def stdin_filepath(in_path='/dev/stdin', in_f=sys.stdin):
@@ -24,7 +35,8 @@ def stdin_filepath(in_path='/dev/stdin', in_f=sys.stdin):
         if is_stdin:
             lp = os.path.realpath(in_path)
             with open(lp) as f:
-                pass
+                if f.isatty():
+                    lp = None
             return lp
         else:
             return None
@@ -53,9 +65,6 @@ def hcp_state(di_file=None):
         elif rm == 'POST':
             start_response('302 Found', [('Location', 'data:text/plain,File received.')])
             state['done'] = True
-            m = email.message.Message()
-            m.add_header('Content-Type', environ['CONTENT_TYPE'])
-            content_type = m.get_content_type()
             fz = (lambda fs: (fs[field_name].file if ((content_type == 'multipart/form-data') and fs[field_name].file) else (StringIO.StringIO(fs.getfirst(field_name)) if (content_type == 'application/x-www-form-urlencoded') else StringIO.StringIO(''))))(fs=cgi.FieldStorage(fp=environ['wsgi.input'], environ=environ))
             with (os.fdopen(sys.stdout.fileno(), 'wb') if (di_file is None) else open(di_file, 'ab')) as f:
                 try:
@@ -74,17 +83,19 @@ def cph_state(di_file=None):
     state = {'done':  False, 'exit': 0}
     if di_file and ((not os.path.exists(di_file)) or os.path.isdir(di_file)):
         raise IOError('{0} is not an acceptable file.'.format(di_file))
-    file_name_frag = urllib.quote_plus(os.path.basename((stdin_filepath() or 'file{0}'.format(''.join(random.choice(string.digits) for _ in range(7)))) if (di_file is None) else di_file))
+    file_name_frag = os.path.basename((stdin_filepath() or 'file{0}'.format(''.join(random.choice(string.digits) for _ in range(7)))) if (di_file is None) else di_file)
+    di_file_url = urllib.quote_plus(file_name_frag)
     clen = (os.path.getsize(di_file) if (di_file is not None) and os.path.isfile(di_file) else None)
+    verify_http_header_component(di_file_url)
 
     def handle_http_request(environ, start_response):
         if state['done']:
             return
         rm = environ['REQUEST_METHOD']
         if rm == 'GET':
-            sn = environ['PATH_INFO']
-            if sn == '/{0}'.format(file_name_frag):
-                start_response('200 ok Boruch Hashem', [('Content-Type', 'application/octet-stream')] + ([] if clen is None else [('Content-Length', str(clen))]))
+            sn = (environ['PATH_INFO'] if ('PATH_INFO' in environ) else '')
+            if (sn[0] == '/') and (urllib.quote_plus(sn[1:]) == '{0}'.format(di_file_url)):
+                start_response('200 ok Boruch Hashem', [('Content-Type', 'application/octet-stream'), ('Content-Disposition', 'attachment; filename="{http_f}"; filename*={http_fs}'.format(**dict(('http_{0}'.format(k), verify_http_header_component(v)) for k, v in dict(f=file_name_frag.decode('ascii', errors='ignore').replace('"', ''), fs=email.utils.encode_rfc2231(file_name_frag, 'UTF-8')).iteritems())))] + ([] if (clen is None) else [('Content-Length', str(clen))]))
                 state['done'] = True
                 try:
                     return wsgiref.util.FileWrapper(os.fdopen(sys.stdin.fileno(), 'rb') if (di_file is None) else open(di_file, 'rb'))
@@ -92,7 +103,8 @@ def cph_state(di_file=None):
                     pass
             else:
                 app_uri = wsgiref.util.application_uri(environ)
-                start_response('302 Found', [('Location', '{0}{1}{http_filename}'.format(app_uri, ('' if app_uri.endswith('/') else '/'), http_filename=str(email.header.Header(file_name_frag))))])
+                # email.header.Header should raise email.errors.HeaderParseError if malicious input
+                start_response('302 Found', [('Location', '{http_u}{http_s}{http_filename}'.format(**dict(('http_{0}'.format(k), verify_http_header_component(v)) for k, v in dict(u=app_uri, s=('' if app_uri.endswith('/') else '/'), filename=di_file_url).iteritems())))])
                 return ()
     return (lambda k: state[k], handle_http_request)
 
