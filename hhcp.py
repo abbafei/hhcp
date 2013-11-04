@@ -19,13 +19,20 @@ import re
 
 
 
-def verify_http_header_component(v):
+def http_validator(v):
     ec = email.header.Header(v).encode()
 
     if re.search(r'(\r?\n[\S\n\r]|\r[\S\r])', ec):
         raise Exception('http header input error in "{h}"'.format(h=v))
     else:
         return ec
+
+
+html_validator = (lambda: cgi.escape(v, True))
+
+
+def validator(prefix, validator_fn, inparams):
+    return dict(('{0}_{1}'.format(prefix, k), validator_fn(v)) for k, v in inparams.iteritems())
 
 
 def stdin_filepath(in_path='/dev/stdin', in_f=sys.stdin):
@@ -61,7 +68,7 @@ def hcp_state(di_file=None):
                 <input type="file" name="{html_field_name}" />
                 <input type="submit" />
             </form>
-            </html>'''.format(**dict(('html_{0}'.format(k), cgi.escape(v, True)) for k, v in {'app_uri': "{0}/send".format(environ['SCRIPT_NAME']), 'field_name': field_name}.iteritems()))
+            </html>'''.format(**validator('html', html_validator, {'app_uri': "{0}/send".format(environ['SCRIPT_NAME']), 'field_name': field_name}))
         elif rm == 'POST':
             start_response('302 Found', [('Location', 'data:text/plain,File received.')])
             state['done'] = True
@@ -79,14 +86,14 @@ def hcp_state(di_file=None):
     return (lambda k: state[k], handle_http_request)
 
 
-def cph_state(di_file=None):
+def cph_state(di_file=None, content_type=None, view_inline=False):
     state = {'done':  False, 'exit': 0}
     if di_file and ((not os.path.exists(di_file)) or os.path.isdir(di_file)):
         raise IOError('{0} is not an acceptable file.'.format(di_file))
     file_name_frag = os.path.basename((stdin_filepath() or 'file{0}'.format(''.join(random.choice(string.digits) for _ in range(7)))) if (di_file is None) else di_file)
     di_file_url = urllib.quote_plus(file_name_frag)
     clen = (os.path.getsize(di_file) if (di_file is not None) and os.path.isfile(di_file) else None)
-    verify_http_header_component(di_file_url)
+    http_validator(di_file_url)
 
     def handle_http_request(environ, start_response):
         if state['done']:
@@ -95,7 +102,7 @@ def cph_state(di_file=None):
         if rm == 'GET':
             sn = (environ['PATH_INFO'] if ('PATH_INFO' in environ) else '')
             if (len(sn) > 0) and (sn[0] == '/') and (urllib.quote_plus(sn[1:]) == '{0}'.format(di_file_url)):
-                start_response('200 ok Boruch Hashem', [('Content-Type', 'application/octet-stream'), ('Content-Disposition', 'attachment; filename="{http_f}"; filename*={http_fs}'.format(**dict(('http_{0}'.format(k), verify_http_header_component(v)) for k, v in dict(f=file_name_frag.decode('ascii', errors='ignore').replace('"', ''), fs=email.utils.encode_rfc2231(file_name_frag, 'UTF-8')).iteritems())))] + ([] if (clen is None) else [('Content-Length', str(clen))]))
+                start_response('200 ok Boruch Hashem', [('Content-Type', ('application/octet-stream' if (content_type is None) else http_validator(content_type)))] + ([('Content-Disposition', 'attachment; filename="{http_f}"; filename*={http_fs}'.format(**validator('http', http_validator, dict(f=file_name_frag.decode('ascii', errors='ignore').replace('"', ''), fs=email.utils.encode_rfc2231(file_name_frag, 'UTF-8')))))] if (not view_inline) else []) + ([] if (clen is None) else [('Content-Length', str(clen))]))
                 state['done'] = True
                 try:
                     return wsgiref.util.FileWrapper(os.fdopen(sys.stdin.fileno(), 'rb') if (di_file is None) else open(di_file, 'rb'))
@@ -104,7 +111,7 @@ def cph_state(di_file=None):
             else:
                 app_uri = wsgiref.util.application_uri(environ)
                 # email.header.Header should raise email.errors.HeaderParseError if malicious input
-                start_response('302 Found', [('Location', '{http_u}{http_s}{http_filename}'.format(**dict(('http_{0}'.format(k), verify_http_header_component(v)) for k, v in dict(u=app_uri, s=('' if app_uri.endswith('/') else '/'), filename=di_file_url).iteritems())))])
+                start_response('302 Found', [('Location', '{http_u}{http_s}{http_filename}'.format(**validator('http', http_validator, dict(u=app_uri, s=('' if app_uri.endswith('/') else '/'), filename=di_file_url))))])
                 return ()
     return (lambda k: state[k], handle_http_request)
 
@@ -137,7 +144,7 @@ if __name__ == '__main__':
     params = ((' '.join(sys.argv[:1]) if is_called_as_subcommand else sys.argv[0]),) + tuple(sys.argv[(2 if is_called_as_subcommand else 1):])
 
     if run_name in prog_names:
-        optparams = getopt.gnu_getopt(params[1:], 'p:n:f:ch')
+        optparams = getopt.gnu_getopt(params[1:], ('p:n:f:ch' if (run_name == 'hcp') else 'p:n:f:chm:v'))
         di_file = get_optval(optparams, '-f', None)
         host = get_optval(optparams, '-n', "")
         portnum = get_optval(optparams, '-p', default_port, int)
@@ -150,8 +157,14 @@ if __name__ == '__main__':
             else:
                 help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <input_file>]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<input_file>: path to input file\n\n'
             sys.stdout.write(help_msg.format(params[0], default_port=str(default_port)))
-        else:
-            cp = (hcp_state if (run_name == 'hcp') else cph_state)(di_file=di_file)
+        else: 
+            state_kwparams = {'di_file': di_file}
+            if (run_name == 'cph'):
+                content_type = get_optval(optparams, '-m', None)
+                view_inline = get_optflag(optparams, '-v')
+                state_kwparams['content_type'] = content_type
+                state_kwparams['view_inline'] = view_inline
+            cp = (hcp_state if (run_name == 'hcp') else cph_state)(**state_kwparams)
             if is_cgi:
                 if di_file is not None:
                     wsgiref.handlers.CGIHandler().run(cp[1])
