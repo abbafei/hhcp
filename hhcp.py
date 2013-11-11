@@ -14,6 +14,7 @@ import StringIO
 import random
 import string
 import re
+import mimetypes
 
 
 
@@ -54,7 +55,7 @@ def stdin_filepath(in_path='/dev/stdin', in_f=sys.stdin):
 
 
 
-def hcp_state(di_file=None):
+def hcp_state(di_file=None, keep_listening=False):
     state = {'done':  False, 'exit': 0}
     field_name = 'zachinalach'
     def handle_http_request(environ, start_response):
@@ -71,7 +72,8 @@ def hcp_state(di_file=None):
             </html>'''.format(**validator('html', html_validator, {'app_uri': "{0}/send".format(environ['SCRIPT_NAME']), 'field_name': field_name}))
         elif rm == 'POST':
             start_response('302 Found', [('Location', 'data:text/plain,File received.')])
-            state['done'] = True
+            if not keep_listening:
+                state['done'] = True
             fz = (lambda fs: (fs[field_name].file if ((content_type == 'multipart/form-data') and fs[field_name].file) else (StringIO.StringIO(fs.getfirst(field_name)) if (content_type == 'application/x-www-form-urlencoded') else StringIO.StringIO(''))))(fs=cgi.FieldStorage(fp=environ['wsgi.input'], environ=environ))
             with (os.fdopen(sys.stdout.fileno(), 'wb') if (di_file is None) else open(di_file, 'ab')) as f:
                 try:
@@ -86,7 +88,7 @@ def hcp_state(di_file=None):
     return (lambda k: state[k], handle_http_request)
 
 
-def cph_state(di_file=None, content_type=None, view_inline=False):
+def cph_state(di_file=None, content_type=None, view_inline=False, keep_listening=False):
     state = {'done':  False, 'exit': 0}
     if di_file and ((not os.path.exists(di_file)) or os.path.isdir(di_file)):
         raise IOError('{0} is not an acceptable file.'.format(di_file))
@@ -102,8 +104,9 @@ def cph_state(di_file=None, content_type=None, view_inline=False):
         if rm == 'GET':
             sn = (environ['PATH_INFO'] if ('PATH_INFO' in environ) else '')
             if (len(sn) > 0) and (sn[0] == '/') and (sn[1:] == '{0}'.format(di_file_url)):
-                start_response('200 ok Boruch Hashem', [('Content-Type', ('application/octet-stream' if (content_type is None) else http_validator(content_type)))] + ([('Content-Disposition', 'attachment; filename="{http_f}"; filename*={http_fs}'.format(**validator('http', http_validator, dict(f=file_name_frag.decode('ascii', errors='ignore').replace('"', ''), fs=email.utils.encode_rfc2231(file_name_frag, 'UTF-8')))))] if (not view_inline) else []) + ([] if (clen is None) else [('Content-Length', str(clen))]))
-                state['done'] = True
+                start_response('200 ok Boruch Hashem', [('Content-Type', (lambda t: ('application/octet-stream' if (t is None) else http_validator(t)))(mimetypes.guess_type(di_file, strict=True)[0] if ((di_file is not None) and (content_type == 'ext')) else content_type))] + ([('Content-Disposition', 'attachment; filename="{http_f}"; filename*={http_fs}'.format(**validator('http', http_validator, dict(f=file_name_frag.decode('ascii', errors='ignore').replace('"', ''), fs=email.utils.encode_rfc2231(file_name_frag, 'UTF-8')))))] if (not view_inline) else []) + ([] if (clen is None) else [('Content-Length', str(clen))]))
+                if not keep_listening:
+                    state['done'] = True
                 try:
                     return wsgiref.util.FileWrapper(os.fdopen(sys.stdin.fileno(), 'rb') if (di_file is None) else open(di_file, 'rb'))
                 finally:
@@ -144,12 +147,13 @@ if __name__ == '__main__':
     params = ((' '.join(sys.argv[:1]) if is_called_as_subcommand else sys.argv[0]),) + tuple(sys.argv[(2 if is_called_as_subcommand else 1):])
 
     if run_name in prog_names:
-        optparams = getopt.gnu_getopt(params[1:], ('p:n:f:ch' if (run_name == 'hcp') else 'p:n:f:chm:v'))
-        di_file = get_optval(optparams, '-f', None)
+        optparams = getopt.gnu_getopt(params[1:], ('p:n:f:chk' if (run_name == 'hcp') else 'p:n:f:chm:vk'))
+        di_file = get_optval(optparams, '-f', None) # stdout if not provided
         host = get_optval(optparams, '-n', "")
         portnum = get_optval(optparams, '-p', default_port, int)
         do_help = get_optflag(optparams, '-h')
-        is_cgi = get_optflag(optparams, '-c')
+        is_cgi = get_optflag(optparams, '-c') # CGI instead of "standalone"
+        keep_listening = get_optflag(optparams, '-k')
 
         if do_help:
             if run_name == 'hcp':
@@ -158,9 +162,9 @@ if __name__ == '__main__':
                 help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <input_file>]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<input_file>: path to input file\n\n'
             sys.stdout.write(help_msg.format(params[0], default_port=str(default_port)))
         else: 
-            state_kwparams = {'di_file': di_file}
+            state_kwparams = {'di_file': di_file, 'keep_listening': keep_listening}
             if (run_name == 'cph'):
-                content_type = get_optval(optparams, '-m', None)
+                content_type = get_optval(optparams, '-m', None) # mime type or "ext" for extension sniffing
                 view_inline = get_optflag(optparams, '-v')
                 state_kwparams['content_type'] = content_type
                 state_kwparams['view_inline'] = view_inline
