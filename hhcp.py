@@ -101,7 +101,7 @@ def cph_state(di_file=None, content_type=None, view_inline=False):
         rm = environ['REQUEST_METHOD']
         if rm == 'GET':
             sn = (environ['PATH_INFO'] if ('PATH_INFO' in environ) else '')
-            if (len(sn) > 0) and (sn[0] == '/') and (urllib.quote_plus(sn[1:]) == '{0}'.format(di_file_url)):
+            if (len(sn) > 0) and (sn[0] == '/') and (sn[1:] == '{0}'.format(di_file_url)):
                 start_response('200 ok Boruch Hashem', [('Content-Type', ('application/octet-stream' if (content_type is None) else http_validator(content_type)))] + ([('Content-Disposition', 'attachment; filename="{http_f}"; filename*={http_fs}'.format(**validator('http', http_validator, dict(f=file_name_frag.decode('ascii', errors='ignore').replace('"', ''), fs=email.utils.encode_rfc2231(file_name_frag, 'UTF-8')))))] if (not view_inline) else []) + ([] if (clen is None) else [('Content-Length', str(clen))]))
                 state['done'] = True
                 try:
