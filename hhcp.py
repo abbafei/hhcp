@@ -77,6 +77,7 @@ def hcp_state(di_file=None, keep_listening=False):
                 state['done'] = True
             ctcm = email.message.Message()
             ctcm.add_header('Content-Type', environ['CONTENT_TYPE']) # TODO: find better way to get mime type from the Content-Type header?
+            ctcm.set_default_type('application/x-www-form-urlencoded')
             content_type = ctcm.get_content_type()
             fz = (lambda fs: (fs[field_name].file if ((content_type == 'multipart/form-data') and fs[field_name].file) else (StringIO.StringIO(fs.getfirst(field_name)) if (content_type == 'application/x-www-form-urlencoded') else StringIO.StringIO(''))))(fs=cgi.FieldStorage(fp=environ['wsgi.input'], environ=environ))
             with (os.fdopen(sys.stdout.fileno(), 'wb') if (di_file is None) else open(di_file, 'ab')) as f:
