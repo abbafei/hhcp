@@ -153,7 +153,7 @@ if __name__ == '__main__':
     params = ((' '.join(sys.argv[:1]) if is_called_as_subcommand else sys.argv[0]),) + tuple(sys.argv[(2 if is_called_as_subcommand else 1):])
 
     if run_name in prog_names:
-        optparams = getopt.gnu_getopt(params[1:], ('p:n:f:chk' if (run_name == 'hcp') else 'p:n:f:chm:vk'))
+        optparams = getopt.gnu_getopt(params[1:], ('p:n:f:chk' if (run_name == 'hcp') else 'p:n:f:chm:Ik'))
         di_file = get_optval(optparams, '-f', None) # stdout if not provided
         host = get_optval(optparams, '-n', "")
         portnum = get_optval(optparams, '-p', default_port, int)
@@ -165,13 +165,13 @@ if __name__ == '__main__':
             if run_name == 'hcp':
                 help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <output_file>] [-c] [-k]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<output_file>: path to output file (to be appended to)\n\t-c: CGI mode (requires a file name to be provided)\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\n'
             else:
-                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <input_file>] [-m <mime_type>] [-c] [-k] [-v]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<input_file>: path to input file\n\t-c: CGI mode (requires a file name to be provided)\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\t-m: mime content type to provide for file requests ("ext" to try to guess type based on file extension, if input file name is provided); default is "application/octet-stream"\n\t-v: view inline (prevents Content-Disposition header from being set to "attachment")\n\n'
+                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <input_file>] [-m <mime_type>] [-c] [-k] [-I]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<input_file>: path to input file\n\t-c: CGI mode (requires a file name to be provided)\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\t-m: mime content type to provide for file requests ("ext" to try to guess type based on file extension, if input file name is provided); default is "application/octet-stream"\n\t-I: view inline (prevents Content-Disposition header from being set to "attachment")\n\n'
             sys.stdout.write(help_msg.format(params[0], default_port=str(default_port)))
         else: 
             state_kwparams = {'di_file': di_file, 'keep_listening': keep_listening}
             if (run_name == 'cph'):
                 content_type = get_optval(optparams, '-m', None) # mime type or "ext" for extension sniffing
-                view_inline = get_optflag(optparams, '-v')
+                view_inline = get_optflag(optparams, '-I')
                 state_kwparams['content_type'] = content_type
                 state_kwparams['view_inline'] = view_inline
             cp = (hcp_state if (run_name == 'hcp') else cph_state)(**state_kwparams)
