@@ -30,7 +30,7 @@ def http_validator(v):
         return ec
 
 
-html_validator = (lambda: cgi.escape(v, True))
+html_validator = (lambda v: cgi.escape(v, True))
 
 
 def validator(prefix, validator_fn, inparams):
