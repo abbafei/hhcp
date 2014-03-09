@@ -56,14 +56,14 @@ def stdin_filepath(in_path='/dev/stdin', in_f=sys.stdin):
 
 
 
-def hcp_state(di_file=None, keep_listening=False):
+def hcp_state(di_file=None, keep_listening=False, raw_format=False):
     state = {'done':  False, 'exit': 0}
     field_name = 'zachinalach'
     def handle_http_request(environ, start_response):
         if state['done']:
             return
         rm = environ['REQUEST_METHOD']
-        if rm == 'GET':
+        if (rm == 'GET') and (not raw_format):
             start_response('200 ok Boruch Hashem', [('Content-Type', 'text/html')])
             yield '''<html><head></head><body>
             <form action="{html_app_uri}" enctype="multipart/form-data" method="POST">
@@ -72,29 +72,50 @@ def hcp_state(di_file=None, keep_listening=False):
             </form>
             </html>'''.format(**validator('html', html_validator, {'app_uri': "{0}/send".format(environ['SCRIPT_NAME']), 'field_name': field_name}))
         elif rm == 'POST':
-            start_response('302 Found', [('Location', 'data:text/plain,File received.')])
+            rcvd_msg_body = 'File received.\r\n'
+            rcvd_msg_content_type = 'text/plain'
+            if raw_format:
+                start_response('200 ok Boruch Hashem', [('Content-Type', rcvd_msg_content_type)])
+            else:
+                start_response('302 Found', [('Location', 'data:{ct},{0}'.format(rcvd_msg_body, ct=rcvd_msg_content_type))])
             if not keep_listening:
                 state['done'] = True
-            ctcm = email.message.Message()
-            if 'CONTENT_TYPE' in environ:
+            content_length = (int(environ['CONTENT_LENGTH']) if (('CONTENT_LENGTH' in environ) and (re.match(r'\d+$', environ['CONTENT_LENGTH']))) else None)
+            if ('CONTENT_TYPE' in environ) and (not raw_format):
+                ctcm = email.message.Message()
                 ctcm.add_header('Content-Type', environ['CONTENT_TYPE']) # TODO: find better way to get mime type from the Content-Type header?
-            ctcm.set_default_type('application/x-www-form-urlencoded')
-            content_type = ctcm.get_content_type()
-            fz = (lambda fs: (fs[field_name].file if ((content_type == 'multipart/form-data') and fs[field_name].file) else (StringIO.StringIO(fs.getfirst(field_name)) if (content_type == 'application/x-www-form-urlencoded') else StringIO.StringIO(''))))(fs=cgi.FieldStorage(fp=environ['wsgi.input'], environ=environ))
-            with (os.fdopen(sys.stdout.fileno(), 'wb') if (di_file is None) else open(di_file, 'ab')) as f:
+                content_type = ctcm.get_content_type()
+            else:
+                content_type = 'application/octet-stream'
+            ctf = {'multipart/form-data': (lambda fs, field_name: fs[field_name].file), 'application/x-www-form-urlencoded': (lambda fs, field_name: (lambda a: (StringIO.StringIO(a) if (a is not None) else None))(fs.getfirst(field_name)))}
+            fr = (ctf[content_type](fs=cgi.FieldStorage(fp=environ['wsgi.input'], environ=environ), field_name=field_name) if (content_type in ctf) else environ['wsgi.input'])
+            with (os.fdopen(sys.stdout.fileno(), 'wb') if (di_file is None) else open(di_file, 'ab')) as fw:
                 try:
-                    for c in wsgiref.util.FileWrapper(fz):
-                        f.write(c)
+                    if fr is None:
+                        pass
+                    elif content_length is None:
+                        fi = wsgiref.util.FileWrapper(fr)
+                        for c in fi:
+                            fw.write(c)
+                    else:
+                        amt_read = 0
+                        chunk_size = 8192
+                        while amt_read < content_length:
+                            read_size = (content_length - amt_read if (content_length - amt_read < chunk_size) else chunk_size)
+                            fw.write(fr.read(read_size))
+                            amt_read += read_size
                 except IOError as e:
                     if e.errno in (9, 32):
                         sys.stderr.write('{0}\n'.format(str(e)))
                         state['exit'] = 2
                     else:
                         raise
+                if raw_format:
+                    yield rcvd_msg_body
     return (lambda k: state[k], handle_http_request)
 
 
-def cph_state(di_file=None, content_type=None, view_inline=False, keep_listening=False):
+def cph_state(di_file=None, content_type=None, raw_format=False, keep_listening=False):
     state = {'done':  False, 'exit': 0}
     if di_file and ((not os.path.exists(di_file)) or os.path.isdir(di_file)):
         raise IOError('{0} is not an acceptable file.'.format(di_file))
@@ -110,7 +131,7 @@ def cph_state(di_file=None, content_type=None, view_inline=False, keep_listening
         if rm == 'GET':
             sn = (environ['PATH_INFO'] if ('PATH_INFO' in environ) else '')
             if (len(sn) > 0) and (sn[0] == '/') and (sn[1:] == '{0}'.format(di_file_url)):
-                start_response('200 ok Boruch Hashem', [('Content-Type', (lambda t: ('application/octet-stream' if (t is None) else http_validator(t)))(mimetypes.guess_type(di_file, strict=True)[0] if ((di_file is not None) and (content_type == 'ext')) else content_type))] + ([('Content-Disposition', 'attachment; filename="{http_f}"; filename*={http_fs}'.format(**validator('http', http_validator, dict(f=file_name_frag.decode('ascii', errors='ignore').replace('"', ''), fs=email.utils.encode_rfc2231(file_name_frag, 'UTF-8')))))] if (not view_inline) else []) + ([] if (clen is None) else [('Content-Length', str(clen))]))
+                start_response('200 ok Boruch Hashem', [('Content-Type', (lambda t: ('application/octet-stream' if (t is None) else http_validator(t)))(mimetypes.guess_type(di_file, strict=True)[0] if ((di_file is not None) and (content_type == 'ext')) else content_type))] + ([('Content-Disposition', 'attachment; filename="{http_f}"; filename*={http_fs}'.format(**validator('http', http_validator, dict(f=file_name_frag.decode('ascii', errors='ignore').replace('"', ''), fs=email.utils.encode_rfc2231(file_name_frag, 'UTF-8')))))] if (not raw_format) else []) + ([] if (clen is None) else [('Content-Length', str(clen))]))
                 if not keep_listening:
                     state['done'] = True
                 try:
@@ -153,27 +174,27 @@ if __name__ == '__main__':
     params = ((' '.join(sys.argv[:1]) if is_called_as_subcommand else sys.argv[0]),) + tuple(sys.argv[(2 if is_called_as_subcommand else 1):])
 
     if run_name in prog_names:
-        optparams = getopt.gnu_getopt(params[1:], ('p:n:f:chk' if (run_name == 'hcp') else 'p:n:f:chm:Ik'))
+        main_paramspec = 'p:n:f:chkI'
+        optparams = getopt.gnu_getopt(params[1:], (main_paramspec if (run_name == 'hcp') else main_paramspec + 'm:'))
         di_file = get_optval(optparams, '-f', None) # stdout if not provided
         host = get_optval(optparams, '-n', "")
         portnum = get_optval(optparams, '-p', default_port, int)
         do_help = get_optflag(optparams, '-h')
         is_cgi = get_optflag(optparams, '-c') # CGI instead of "standalone"
         keep_listening = get_optflag(optparams, '-k')
+        raw_format = get_optflag(optparams, '-I')
 
         if do_help:
             if run_name == 'hcp':
-                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <output_file>] [-c] [-k]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<output_file>: path to output file (to be appended to)\n\t-c: CGI mode (requires a file name to be provided), standalone server is used if not specified\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\n'
+                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <output_file>] [-c] [-k]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<output_file>: path to output file (to be appended to)\n\t-c: CGI mode (requires a file name to be provided), standalone server is used if not specified\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\t-I: set content-type to interpret post-data with application/octet-stream (the raw post-data itself is output, instead of post params)\n\n'
             else:
                 help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <input_file>] [-m <mime_type>] [-c] [-k] [-I]\n\t-p: port to listen with (default port: {default_port})\n\t-h: host to listen with\n\t<input_file>: path to input file\n\t-c: CGI mode (requires a file name to be provided), standalone server is used if not specified\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\t-m: mime content type to provide for file requests ("ext" to try to guess type based on file extension, if input file name is provided); default is "application/octet-stream"\n\t-I: view inline (prevents Content-Disposition header from being set to "attachment")\n\n'
             sys.stdout.write(help_msg.format(params[0], default_port=str(default_port)))
         else: 
-            state_kwparams = {'di_file': di_file, 'keep_listening': keep_listening}
+            state_kwparams = {'di_file': di_file, 'keep_listening': keep_listening, 'raw_format': raw_format}
             if (run_name == 'cph'):
-                content_type = get_optval(optparams, '-m', None) # mime type or "ext" for extension sniffing
-                view_inline = get_optflag(optparams, '-I')
+                content_type = get_optval(optparams, '-m', None)
                 state_kwparams['content_type'] = content_type
-                state_kwparams['view_inline'] = view_inline
             cp = (hcp_state if (run_name == 'hcp') else cph_state)(**state_kwparams)
             if is_cgi:
                 if di_file is not None:
