@@ -16,6 +16,7 @@ import random
 import string
 import re
 import mimetypes
+import zlib
 
 
 
@@ -54,6 +55,30 @@ def stdin_filepath(in_path='/dev/stdin', in_f=sys.stdin):
             return False
 
 
+def read_post_fileobj(fr, content_length):
+    if fr is None:
+        return
+    elif content_length is None:
+        fi = wsgiref.util.FileWrapper(fr)
+        for c in fi:
+            yield c
+    else:
+        amt_read = 0
+        chunk_size = 8192
+        while amt_read < content_length:
+            read_size = (content_length - amt_read if (content_length - amt_read < chunk_size) else chunk_size)
+            yield fr.read(read_size)
+            amt_read += read_size
+
+
+def zcat_iter(ii):
+    try:
+        zo = zlib.decompressobj(16+zlib.MAX_WBITS)
+        for i in ii:
+            yield zo.decompress(i)
+    except zlib.error:
+        return
+
 
 
 def hcp_state(di_file=None, keep_listening=False, raw_format=False):
@@ -87,23 +112,16 @@ def hcp_state(di_file=None, keep_listening=False, raw_format=False):
                 content_type = ctcm.get_content_type()
             else:
                 content_type = 'application/octet-stream'
+            ced = {'gzip': zcat_iter}
             ctf = {'multipart/form-data': (lambda fs, field_name: fs[field_name].file), 'application/x-www-form-urlencoded': (lambda fs, field_name: (lambda a: (StringIO.StringIO(a) if (a is not None) else None))(fs.getfirst(field_name)))}
-            fr = (ctf[content_type](fs=cgi.FieldStorage(fp=environ['wsgi.input'], environ=environ), field_name=field_name) if (content_type in ctf) else environ['wsgi.input'])
+            fro = environ['wsgi.input']
+            fr = (ctf[content_type](fs=cgi.FieldStorage(fp=fro, environ=environ), field_name=field_name) if (content_type in ctf) else fro)
             with (os.fdopen(sys.stdout.fileno(), 'wb') if (di_file is None) else open(di_file, 'ab')) as fw:
                 try:
-                    if fr is None:
-                        pass
-                    elif content_length is None:
-                        fi = wsgiref.util.FileWrapper(fr)
-                        for c in fi:
-                            fw.write(c)
-                    else:
-                        amt_read = 0
-                        chunk_size = 8192
-                        while amt_read < content_length:
-                            read_size = (content_length - amt_read if (content_length - amt_read < chunk_size) else chunk_size)
-                            fw.write(fr.read(read_size))
-                            amt_read += read_size
+                    foi = read_post_fileobj(fr, content_length)
+                    foidec = (ced[environ['HTTP_CONTENT_ENCODING']] if (('HTTP_CONTENT_ENCODING' in environ) and (environ['HTTP_CONTENT_ENCODING'] in ced)) else (lambda ii: ii))(foi)
+                    for c in foidec:
+                        fw.write(c)
                 except IOError as e:
                     if e.errno in (9, 32):
                         sys.stderr.write('{0}\n'.format(str(e)))
