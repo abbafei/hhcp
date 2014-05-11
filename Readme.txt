@@ -49,7 +49,7 @@ Some ideas of use cases:
 		# get the text which is to be edited when emulating the Wikipedia "edit" api
 		$ hcp -I -m text -f logfile.log -s '204 No content'
 	- <whatever good ideas you think of>
-		$ hhcp :-)
+		$ hhcp <  your idea here :-)  >
 
 
 Enjoy :-).
