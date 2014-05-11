@@ -118,7 +118,7 @@ def hcp_state(di_file=None, keep_listening=False, return_status=None, type_read=
             rcvd_msg_content_type = 'text/plain'
             rcvd_msg_body = 'File received.'
             if raw_format or return_status:
-                start_response(rs, [('Content-Type', rcvd_msg_content_type)])
+                start_response(rs, [('Content-Type', rcvd_msg_content_type), ('Content-Length', str(len(bytes(rcvd_msg_body))))])
             else:
                 start_response('302 Found', [('Location', 'data:{http_ct},{http_b}'.format(**validator('http', http_validator, dict(b=rcvd_msg_body, ct=rcvd_msg_content_type))))])
             if not keep_listening:
@@ -221,6 +221,8 @@ if __name__ == '__main__':
     get_optparam = lambda params, i, default_val=None: (params[1][i] if (len(params[1]) > i) else default_val)
 
     prog_names_map = {'http_ul_name': 'hcp', 'http_dl_name': 'cph'}
+    prog_descrs_map = dict((v, k) for k, v in prog_names_map.iteritems())
+    prog_taglines = {'http_dl_name': 'Receives data from HTTP clients', 'http_ul_name': 'Sends data to HTTP clients'}
     prog_names = tuple(prog_names_map.itervalues())
     http_dl_name = prog_names_map['http_dl_name']
     http_ul_name = prog_names_map['http_ul_name']
@@ -247,12 +249,12 @@ if __name__ == '__main__':
 
         if do_help:
             if run_name == http_ul_name:
-                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <output_file>] [-m <param_title>] [-s <status_line>] [-c] [-k] [-I]\n\t<port>: port to listen with (default: {default_port})\n\t<host>: host to listen with (default: "{default_host}")\n\t<output_file>: path to output file (to be appended to)\n\t<param_title>: title of param to parse and return contents of (default is raw post-body contents in non-interactive mode, otherwise system-selected param); also, note that if the HTTP request does not set the POST Content-Type, the application/octet-stream a.k.a. raw post-body is used (even if the param-title is set); also, GET also works in non-interactive mode, using query-string as the post-body\n\t<status_line>: HTTP status line to use\n\t-c: CGI mode (requires a file name to be provided), standalone server is used if not specified\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\t-I: non-interactive mode (do not provide GUI for file upload, and interpret post-data with application/octet-stream (the raw post-data itself is output, instead of post params) if no <param_title> is provided\n\n'
+                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <output_file>] [-m <param_title>] [-s <status_line>] [-c] [-k] [-I]\n\n{tag_line}.\n\t<port>: port to listen with (default: {default_port})\n\t<host>: host to listen with (default: "{default_host}")\n\t<output_file>: path to output file (to be appended to)\n\t<param_title>: title of param to parse and return contents of (default is raw post-body contents in non-interactive mode, otherwise system-selected param); also, note that if the HTTP request does not set the POST Content-Type, the application/octet-stream a.k.a. raw post-body is used (even if the param-title is set); also, GET also works in non-interactive mode, using query-string as the post-body\n\t<status_line>: HTTP status line to use\n\t-c: CGI mode (requires a file name to be provided), standalone server is used if not specified\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\t-I: non-interactive mode (do not provide GUI for file upload, and if no <param_title> is provided then interpret post-data with application/octet-stream (the raw post-data itself is output, instead of a post param value)\n\n'
             elif run_name == http_dl_name:
-                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <input_file>] [-m <mime_type>] [-s <status_line>] [-c] [-k] [-I]\n\t<port>: port to listen with (default: {default_port})\n\t<host>: host to listen with (default: "{default_host}")\n\t<input_file>: path to input file\n\t<status_line>: HTTP status line to use\n\t<mime_type>: mime content type to provide for file requests ("ext" to try to guess type based on file extension, if input file name is provided); default is "application/octet-stream"\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\t-I: view inline (prevents Content-Disposition header from being set to "attachment")\n\t-c: CGI mode (requires a file name to be provided), standalone server is used if not specified\n\n'
+                help_msg = 'Usage: {0} [-p <port>] [-n <host>] [-f <input_file>] [-m <mime_type>] [-s <status_line>] [-c] [-k] [-I]\n\n{tag_line}.\n\t<port>: port to listen with (default: {default_port})\n\t<host>: host to listen with (default: "{default_host}")\n\t<input_file>: path to input file; the filename is sent to the client, where it is often saved with this name (if the file is not specified explicitly, an attempt is made to get the file name if specified on stdin (where this is supported); example "{prog_name} < file" (however, "cat file | {prog_name}" should not give it the file name)\n\t<status_line>: HTTP status line to use\n\t<mime_type>: mime content type to provide for file requests ("ext" to try to guess type based on file extension, if input file name is provided); default is "application/octet-stream"\n\t-k: keep listening for additional requests after the file is requested (useful for clients that request files multiple times before fetching)\n\t-I: view inline (prevents Content-Disposition header from being set to "attachment")\n\t-c: CGI mode (requires a file name to be provided), standalone server is used if not specified\n\n'
             else:
                 help_msg = ''
-            sys.stdout.write(help_msg.format(params[0], default_port=str(default_port), default_host=default_host))
+            sys.stdout.write(help_msg.format(params[0], default_port=str(default_port), default_host=default_host, tag_line=prog_taglines[prog_descrs_map[run_name]], prog_name=run_name))
         else: 
             state_kwparams = {'di_file': di_file, 'keep_listening': keep_listening, 'raw_format': raw_format, 'type_read': type_read, 'return_status': return_status}
             if (run_name == http_dl_name):
