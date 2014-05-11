@@ -6,7 +6,7 @@ Inspired by skypipe (https://github.com/progrium/skypipe), and in turn, by unix 
 The name is a play on uucp (https://en.wikipedia.org/wiki/UUCP).
 This program is not the program which used to be used within academic networks 
 	within the UK back in the day 
-	(http://web.archive.org/web/20071108200443/http://www.ust.hk/itsc/unix/UNIXhelp1.3/Pages/tasks/ftp3.html)
+	(http://web.archive.org/web/19980430045746/http://unixhelp.ed.ac.uk/tasks/ftp3.html)
 	:-).
 
 hcp receives data which HTTP clients upload,
