@@ -155,8 +155,6 @@ def hcp_state(di_file=None, keep_listening=False, return_status=None, type_read=
                         state['exit'] = 2
                     else:
                         raise
-                if raw_format:
-                    yield rcvd_msg_body
             elif (rm == 'GET') and raw_format and ('CONTENT_TYPE' in environ):
                 oo = None
                 ctcm = email.message.Message()
@@ -170,6 +168,8 @@ def hcp_state(di_file=None, keep_listening=False, return_status=None, type_read=
                     oo = query_string
                 if oo is not None:
                     fw.write(oo)
+            if raw_format:
+                yield rcvd_msg_body
     return (lambda k: state[k], handle_http_request)
 
 
