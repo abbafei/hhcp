@@ -164,7 +164,7 @@ def hcp_state(di_file=None, keep_listening=False, return_status=None, type_read=
                 if type_read and (content_type == 'application/x-www-form-urlencoded'):
                     pq = urlparse.parse_qs(query_string)
                     oo = ((pq[field_name] if isinstance(pq[field_name], basestring) else pq[field_name][0]) if ((field_name in pq) and (len(pq[field_name]) > 0)) else '')
-                elif (content_type == 'application/octet-stream'):
+                elif (content_type == 'application/octet-stream') or (not type_read):
                     oo = query_string
                 if oo is not None:
                     fw.write(oo)
